@@ -1,0 +1,8 @@
+data_dir = "/var/lib/vector"
+
+# https://github.com/timberio/vector/pull/7166
+[provider]
+type = "http"
+url = "${VECTOR_CONFIG_URL}"
+poll_interval_secs = 600
+

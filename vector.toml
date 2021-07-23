@@ -1,0 +1,79 @@
+data_dir = "/var/lib/vector"
+
+# https://github.com/timberio/vector/pull/7166
+# [provider]
+# type = "http"
+# url = "${VECTOR_CONFIG_URL}"
+# poll_interval_secs = 600
+
+[sources.from_pubsub]
+type = "http"
+address = "0.0.0.0:8080"
+path = "/"
+encoding = "json"
+
+[transforms.parse_pubsub_payload]
+type = "remap"
+inputs = ["from_pubsub"]
+source = '''
+tmp = {}
+tmp.pubsub = .
+tmp.parsed_data = parse_json!(decode_base64!(.message.data))
+. = tmp
+'''
+
+[transforms.create_slack_payload]
+type = "remap"
+inputs = ["parse_pubsub_payload"]
+source = '''
+.slack.text = .parsed_data.message || .parsed_data.textPayload || .parsed_data.jsonPayload.msg || ""
+
+.slack.blocks = []
+header_str = .slack.text
+header_section = {"type": "section", "text": {"type": "plain_text", "text": header_str, "emoji": true}}
+.slack.blocks = push(.slack.blocks, header_section)
+kv_fields = []
+severity = "*Severity*\n" + (.parsed_data.severity || "unknown")
+kv_fields = push(kv_fields, {"type": "mrkdwn", "text": severity})
+database_id = "*DatabaseID*\n" + (.parsed_data.resource.labels.database_id || "unknown")
+kv_fields = push(kv_fields, {"type": "mrkdwn", "text": database_id})
+project_id = "*ProjectID*\n" + (.parsed_data.resource.labels.project_id || "unknown")
+kv_fields = push(kv_fields, {"type": "mrkdwn", "text": project_id})
+kv_section = {"type": "section", "fields": kv_fields}
+.slack.blocks = push(.slack.blocks, kv_section)
+. = .slack
+'''
+
+# https://github.com/timberio/vector/issues/3378
+[transforms.format_http]
+type = "lua"
+inputs = ["create_slack_payload"]
+version = "2"
+hooks.process = '''
+function (event, emit)
+  emit(event)
+end
+'''
+
+# [sinks.debug_parse_pubsub_payload]
+# type = "console"
+# inputs = ["parse_pubsub_payload"]
+# encoding.codec = "json"
+#
+# [sinks.debug_slack_payload]
+# type = "console"
+# inputs = ["create_slack_payload"]
+# encoding.codec = "json"
+#
+# [sinks.debug_format_http]
+# type = "console"
+# inputs = ["format_http"]
+# encoding.codec = "json"
+#
+[sinks.to_slack]
+type = "http"
+inputs = ["format_http"]
+encoding.codec = "ndjson"
+encoding.except_fields = ["data"]
+batch.max_events = 1
+uri = "${SLACK_WEBHOOK}"
