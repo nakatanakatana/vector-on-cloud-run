@@ -1,0 +1,8 @@
+FROM timberio/vector:0.15.0-debian
+
+COPY vector_remote.toml /etc/vector/vector.toml
+
+ADD https://github.com/ahmetb/runsd/releases/download/v0.0.0-rc.15/runsd /bin/runsd
+RUN chmod +x /bin/runsd
+
+ENTRYPOINT ["/bin/runsd", "--", "/usr/bin/vector"]
